@@ -1,8 +1,6 @@
 import streamlit as st
 import pandas as pd
 from fuzzywuzzy import fuzz
-import requests
-import os
 
 # Set page config as the first Streamlit command
 st.set_page_config(page_title="Grok-Powered Website", layout="wide", initial_sidebar_state="expanded")
@@ -19,14 +17,10 @@ if "messages" not in st.session_state:
 if "tone" not in st.session_state:
     st.session_state.tone = "Witty"
 
-# xAI API configuration
-XAI_API_URL = "https://api.x.ai/v1/chat/completions"  # Example endpoint
-XAI_API_KEY = os.getenv("XAI_API_KEY", "xai-Q1RdkNwxb1CjpuAzXon6gNG4Zgl3Y1XPk8Ez4otznTCq94xMHZlPFr7Y3dTrFF7j9pmz8q9vpq9SNvw0")  # Use environment variable or fallback
-
 # Search CSV for answers
 def find_answer_from_data(query):
     if df.empty or not query:
-        return None
+        return "No data available to answer the question."
     
     query = query.lower()
     best_score = 0
@@ -36,13 +30,26 @@ def find_answer_from_data(query):
     for _, row in df.iterrows():
         # Check personname, firstname, lastname for a match
         names = [str(row.get(col, '')).lower() for col in ['personname', 'firstname', 'lastname'] if str(row.get(col, ''))]
-        name_score = max(fuzz.token_sort_ratio(query, name) for name in names) if names else 0
+        name_scores = [(name, fuzz.token_sort_ratio(query, name)) for name in names] if names else []
+        
+        # Log scores for debugging
+        print(f"Query: {query}, Name scores: {name_scores}")
+        
+        # Get the highest score
+        if name_scores:
+            name_score = max(score for _, score in name_scores)
+            matched_name = max(name_scores, key=lambda x: x[1])[0]
+        else:
+            name_score = 0
         
         # If query matches a name or contains keywords
         if name_score > 60 or any(name in query for name in names):
             # Construct answer based on question context
             if "degree" in query or "education" in query:
-                answer = f"{row.get('personname', 'Unknown')} earned a {row.get('degreetypename', 'unknown degree')} from {row.get('degreeinstitution', 'unknown institution')} in {row.get('degreeyear', 'unknown year')}."
+                degree = row.get('degreetypename', 'unknown degree')
+                institution = row.get('degreeinstitution', 'unknown institution')
+                year = row.get('degreeyear', 'unknown year')
+                answer = f"{row.get('personname', 'Unknown')} earned a {degree} from {institution} in {year}."
             elif "emeritus" in query:
                 status = "emeritus" if row.get('isemeritus', 0) == 1 else "not emeritus"
                 answer = f"{row.get('personname', 'Unknown')} is {status}."
@@ -57,22 +64,7 @@ def find_answer_from_data(query):
                 best_score = name_score
                 best_answer = answer
 
-    return best_answer
-
-# xAI API call
-def query_xai(query, tone):
-    headers = {"Authorization": f"Bearer {XAI_API_KEY}", "Content-Type": "application/json"}
-    data = {
-        "model": "grok-3",
-        "messages": [{"role": "user", "content": f"Answer in a {tone.lower()} tone: {query}"}],
-        "temperature": 0.5
-    }
-    try:
-        response = requests.post(XAI_API_URL, headers=headers, json=data)
-        response.raise_for_status()
-        return response.json()["choices"][0]["message"]["content"]
-    except Exception as e:
-        return f"Error calling xAI API: {str(e)}. Try a question about the CSV data."
+    return best_answer if best_answer else f"No record found for '{query}'. Try a different name or question."
 
 # Styling
 st.markdown("""
@@ -86,7 +78,7 @@ st.markdown("""
 
 # Display data file error if applicable
 if df.empty:
-    st.error("CSV data file not found or invalid. Using API only.")
+    st.error("CSV data file not found or invalid. Cannot answer questions.")
 
 # Multi-page navigation
 page = st.sidebar.selectbox("Navigate", ["Home", "Chat with Grok", "About"])
@@ -96,16 +88,16 @@ if page == "Home":
     st.title("Welcome to the Grok-Powered Website")
     st.markdown("""
         Dive into a universe of knowledge with our AI-powered site! 
-        - **Chat with Grok**: Ask questions about academic records or anything else, powered by a CSV data file and Grok’s cosmic insights.
+        - **Chat with Grok**: Ask questions about academic records from our CSV data file.
         - **About**: Learn about our mission to explore the stars.
-        Built with xAI’s Grok and a curated dataset for out-of-this-world answers.
+        Built with a curated dataset for out-of-this-world answers.
     """)
     st.image("https://via.placeholder.com/800x400.png?text=Cosmic+Universe", caption="Explore the Cosmos")
 
 # Chat page
 elif page == "Chat with Grok":
     st.title("Chat with Grok")
-    st.markdown("Ask about academic records or anything else, and Grok will answer using a CSV data file or its cosmic knowledge!")
+    st.markdown("Ask about academic records, and Grok will answer using the CSV data file!")
 
     # Tone selection
     tone = st.selectbox("Select Grok's Tone", ["Witty", "Formal", "Casual"], index=["Witty", "Formal", "Casual"].index(st.session_state.tone))
@@ -133,8 +125,7 @@ elif page == "Chat with Grok":
 
     if submit_button and user_input:
         st.session_state.messages.append({"role": "user", "content": user_input})
-        data_response = find_answer_from_data(user_input)
-        response = data_response if data_response else query_xai(user_input, tone)
+        response = find_answer_from_data(user_input)
         st.session_state.messages.append({"role": "bot", "content": response})
         st.rerun()
 
@@ -143,6 +134,6 @@ else:
     st.title("About Us")
     st.markdown("""
         We’re a team of cosmic enthusiasts, inspired by xAI’s mission to accelerate human discovery.
-        Our Grok-like chat feature uses a CSV data file of academic records for curated answers and xAI’s API for dynamic responses.
+        Our Grok-like chat feature uses a CSV data file of academic records to answer your questions.
         Reach out at cosmic@website.com or follow us on X!
     """)
